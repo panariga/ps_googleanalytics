@@ -250,13 +250,59 @@ class HookDisplayBeforeBodyClosingTag implements HookInterface
         }
 
         // Save this information to a cookie
-        $this->context->cookie->ga_last_listing = json_encode([
+        $ga_last_listing = json_encode([
             'item_list_url' => $_SERVER['REQUEST_URI'],
             'item_list_id' => $this->context->controller->php_self,
             'item_list_name' => $listing['label'],
         ]);
+        if ($this->testIfCookieSizeOk($this->context->cookie, ['ga_last_listing' => $ga_last_listing])) {
+            $this->context->cookie->ga_last_listing = $ga_last_listing;
+        }
     }
 
+       /**
+     * Checks if adding new data to a cookie will exceed the browser's cookie size limit.
+     *
+     * This function simulates adding new data to an existing cookie, encrypts the combined data,
+     * and then checks if the resulting cookie size (including the cookie name and encrypted content)
+     * exceeds the 4096-byte limit.  It's crucial to perform this check *before* actually setting
+     * the cookie to avoid truncation or other issues caused by oversized cookies.
+     *
+     * @param \Cookie $cookie The PrestaShop Cookie object representing the existing cookie.
+     * @param array $newData An associative array of key-value pairs representing the data to be added to the cookie.
+     *
+     * @return bool True if adding the new data will *not* exceed the cookie size limit, false otherwise.
+     */
+    private function testIfCookieSizeOk(\Cookie $cookie, array $newData): bool
+    {
+        $testCookie = '';
+
+        // Build the cookie string from existing data
+        foreach ($cookie->getAll() as $key => $value) {
+            $testCookie .= $key . '|' . $value . '¤';
+        }
+
+        // Add the new data to the cookie string
+        foreach ($newData as $key => $value) {
+            $testCookie .= $key . '|' . $value . '¤';
+        }
+
+        // Add a checksum to the cookie string for integrity verification
+        $newChecksum = hash('sha256', str_pad('', 32, '0')) . $testCookie; // Dummy salt for testing
+        $testCookie .= 'checksum|' . $newChecksum;
+
+        // Encrypt the combined cookie data
+        $cipherTool = new \PhpEncryption(_NEW_COOKIE_KEY_);
+        $content = $cipherTool->encrypt($testCookie);
+
+        // Check if the total cookie size (name + encrypted content) exceeds the limit
+        if (strlen($cookie->getName() . $content) > 4096) {
+            return false; // Cookie size exceeds the limit
+        }
+
+        return true; // Cookie size is within the limit
+    }
+    
     /**
      * Outputs all events we stored into data repository during previous AJAX requests
      * on previous page.
